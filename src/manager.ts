@@ -9,13 +9,13 @@ import type { Pool } from './utils/sql';
 const brandSymbol = Symbol('brand');
 type WorkerId = number & { [brandSymbol]: 'WorkerId' };
 
-export type WorkerManager = {
+export interface WorkerManager {
   start(): Promise<void>;
-  work<TData>(props: QueueWorkerConfig<TData>): Promise<WorkerId>;
+  register<TData>(props: QueueWorkerConfig<TData>): Promise<WorkerId>;
   notifyWorker(workerId: WorkerId): void;
   stopWorker(workerId: WorkerId): Promise<void>;
   stop(): Promise<void>;
-};
+}
 
 export type WorkerManagerProperties = {
   pgClient: Pool;
@@ -84,7 +84,7 @@ export const createManager = (properties: WorkerManagerProperties): WorkerManage
     return workerId;
   }
 
-  async function work<TData>(config: QueueWorkerConfig<TData>): Promise<WorkerId> {
+  async function register<TData>(config: QueueWorkerConfig<TData>): Promise<WorkerId> {
     await ensureStarted();
     return startWorker(config);
   }
@@ -93,7 +93,7 @@ export const createManager = (properties: WorkerManagerProperties): WorkerManage
     start() {
       return ensureStarted();
     },
-    work,
+    register,
     notifyWorker(workerId) {
       workers.get(workerId)?.notify();
     },

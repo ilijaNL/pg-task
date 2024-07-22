@@ -2,7 +2,7 @@ import { Pool } from 'pg';
 import { createPlans } from './plans';
 import { ConfiguredTask, TaskResultStates, Task, SelectedTask, TaskResult } from './task';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { cleanupSchema, createRandomSchema } from '../__tests__/db';
+import { cleanupSchema, createRandomSchema } from '../__utils__/db';
 import { executeQuery } from './utils/sql';
 import { migrate } from './utils/migrate';
 import { createMigrations } from './migrations';

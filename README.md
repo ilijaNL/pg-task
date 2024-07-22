@@ -21,7 +21,7 @@ const manager = createManager({
 await manager.start();
 
 // Register a worker for `worker-queue` task queue
-const workerId = await manager.work<MyTask>({
+const workerId = await manager.register<MyTask>({
   queue: 'worker-queue',
   async handler(data) {
     await Promise.resolve();
