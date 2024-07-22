@@ -2,6 +2,10 @@ name: integration
 
 on:
   workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: true
+      
   pull_request:
     branches:
       - "main"
@@ -57,4 +61,3 @@ jobs:
         uses: codecov/codecov-action@v4.5.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
