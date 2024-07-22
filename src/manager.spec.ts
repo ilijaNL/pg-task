@@ -1,6 +1,6 @@
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
-import { cleanupSchema, createRandomSchema } from '../__tests__/db';
+import { cleanupSchema, createRandomSchema } from '../__utils__/db';
 import { createManager } from './manager';
 import EventEmitter, { once } from 'node:events';
 import { executeQuery } from './utils/sql';
@@ -58,7 +58,7 @@ describe('pg worker', () => {
     const ee = new EventEmitter();
     const promise = once(ee, 'received');
 
-    const workerId = await manager.work({
+    const workerId = await manager.register({
       queue: queue,
       options: {
         poolInternvalInMs: 20,
