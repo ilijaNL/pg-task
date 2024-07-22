@@ -4,6 +4,7 @@
   "compilerOptions": {
     "target": "ESNext",
     "composite": false,
+    "outDir": "./dist",
     "declaration": true,
     "declarationMap": false,
     "newLine": "lf",

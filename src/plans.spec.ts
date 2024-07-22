@@ -1,14 +1,15 @@
 import { Pool } from 'pg';
 import { createPlans } from './plans';
-import { ConfiguredTask, TaskResultStates, Task } from './task';
+import { ConfiguredTask, TaskResultStates, Task, SelectedTask, TaskResult } from './task';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { cleanupSchema, createRandomSchema } from '../__tests__/db';
 import { executeQuery } from './utils/sql';
 import { migrate } from './utils/migrate';
 import { createMigrations } from './migrations';
 import { setTimeout } from 'timers/promises';
+import { createBatcher } from 'node-batcher';
 
-const generateTasks = (amount: number, data: Task['data']): Array<ConfiguredTask> =>
+const generateTasks = (amount: number, data: Task['data'], startAfterSeconds = 100): Array<ConfiguredTask> =>
   new Array(amount).fill({
     data: data,
     expireInSeconds: 100,
@@ -18,7 +19,7 @@ const generateTasks = (amount: number, data: Task['data']): Array<ConfiguredTask
     retryBackoff: false,
     retryDelayInSeconds: 20,
     singletonKey: null,
-    startAfterSeconds: 100,
+    startAfterSeconds: startAfterSeconds,
   } as ConfiguredTask);
 
 describe('plans', () => {
@@ -364,6 +365,156 @@ describe('plans', () => {
           state: TaskResultStates.success,
         },
       ]);
+    });
+  });
+
+  describe('performance', () => {
+    let pool: Pool;
+    let container: StartedPostgreSqlContainer;
+
+    let schema = createRandomSchema();
+    let plans: ReturnType<typeof createPlans>;
+
+    beforeAll(async () => {
+      container = await new PostgreSqlContainer().start();
+    });
+
+    afterAll(async () => {
+      await container.stop();
+    });
+
+    beforeEach(async () => {
+      pool = new Pool({
+        connectionString: container.getConnectionUri(),
+        // use 5
+        max: 5,
+      });
+      schema = createRandomSchema();
+      plans = createPlans(schema);
+      await migrate(pool, schema, createMigrations(schema));
+    });
+
+    afterEach(async () => {
+      await cleanupSchema(pool, schema);
+      await pool?.end();
+    });
+
+    it('creates 100000 tasks under 10 seconds', async () => {
+      jest.setTimeout(30000);
+
+      // pre-generated batches
+      const taskBatch = generateTasks(10, {
+        nested: { morenested: { a: '123', b: true, deep: { abc: 'long-string', number: 123123123 } } },
+      });
+
+      const start = process.hrtime();
+      const createTaskQuery = plans.createTasks(taskBatch);
+      for (let i = 0; i < 2000; ++i) {
+        await Promise.all([
+          executeQuery(pool, createTaskQuery),
+          executeQuery(pool, createTaskQuery),
+          executeQuery(pool, createTaskQuery),
+          executeQuery(pool, createTaskQuery),
+          executeQuery(pool, createTaskQuery),
+        ]);
+      }
+
+      const [seconds] = process.hrtime(start);
+
+      expect(seconds).toBeLessThan(10);
+    });
+
+    it('pops 100000 tasks under 10 seconds', async () => {
+      jest.setTimeout(30000);
+
+      // pre-generated batches
+      const taskBatch = generateTasks(
+        10,
+        {
+          nested: { morenested: { a: '123', b: true, deep: { abc: 'long-string', number: 123123123 } } },
+        },
+        0
+      );
+
+      const createTasksQuery = plans.createTasks(taskBatch);
+      const createPromises = [];
+      // create
+      for (let i = 0; i < 10000; ++i) {
+        createPromises.push(executeQuery(pool, createTasksQuery));
+      }
+
+      await Promise.all(createPromises);
+
+      const getTaskQuery = plans.getAndStartTasks(taskBatch[0]!.queue, 10);
+      const start = process.hrtime();
+
+      const getTasksPromises: Promise<SelectedTask[]>[] = [];
+      for (let i = 0; i < 10000; ++i) {
+        getTasksPromises.push(executeQuery(pool, getTaskQuery));
+      }
+      const tasks = (await Promise.all(getTasksPromises)).flat();
+      const [seconds] = process.hrtime(start);
+
+      expect(tasks.length).toBe(100000);
+      expect(seconds).toBeLessThan(10);
+    });
+
+    it('resolves 100000 tasks under 10 seconds', async () => {
+      jest.setTimeout(40000);
+
+      // pre-generated batches
+      const taskBatch = generateTasks(
+        100,
+        {
+          nested: { morenested: { a: '123', b: true, deep: { abc: 'long-string', number: 123123123 } } },
+        },
+        0
+      );
+
+      const createTasksQuery = plans.createTasks(taskBatch);
+
+      const createPromises = [];
+      // create
+      for (let i = 0; i < 1000; ++i) {
+        createPromises.push(executeQuery(pool, createTasksQuery));
+      }
+
+      await Promise.all(createPromises);
+
+      const getTaskQuery = plans.getAndStartTasks(taskBatch[0]!.queue, 50);
+
+      const getTasksPromises: Promise<SelectedTask[]>[] = [];
+      for (let i = 0; i < 2000; ++i) {
+        getTasksPromises.push(executeQuery(pool, getTaskQuery));
+      }
+      const taskIds = (await Promise.all(getTasksPromises)).flat().map((t) => t.id);
+
+      expect(taskIds.length).toBe(100000);
+      const resolveBatcher = createBatcher<TaskResult>({
+        maxSize: 5,
+        maxTimeInMs: 100,
+        onFlush: async (batch) => {
+          await executeQuery(pool, plans.resolveTasks(batch.map((item) => item.data)));
+        },
+      });
+      const start = process.hrtime();
+
+      const promises: Array<Promise<any>> = [];
+      for (let i = 0; i < taskIds.length; ++i) {
+        promises.push(
+          resolveBatcher.add({ result: { success: true }, state: TaskResultStates.success, task_id: taskIds[i]! })
+        );
+      }
+
+      await Promise.all(promises);
+
+      const [seconds] = process.hrtime(start);
+
+      expect(seconds).toBeLessThan(10);
+
+      // sanity check
+      const [lastLog] = await executeQuery(pool, plans.getTaskExecutionLog(taskIds[taskIds.length - 1]!));
+      expect(lastLog?.task_id).toBe(taskIds[taskIds.length - 1]!);
     });
   });
 });
