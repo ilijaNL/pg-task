@@ -128,7 +128,7 @@ describe('task-worker', () => {
           }
         },
       },
-      { maxConcurrency: amountOfTasks, poolInternvalInMs: 20, refillThresholdPct: 0.33 }
+      { maxConcurrency: amountOfTasks, poolInternvalInMs: 80, refillThresholdPct: 0.33 }
     );
 
     worker.start();
@@ -221,7 +221,7 @@ describe('task-worker', () => {
           await setTimeout(200);
         },
       },
-      { maxConcurrency: amountOfTasks, poolInternvalInMs: 20, refillThresholdPct: 0.33 }
+      { maxConcurrency: amountOfTasks, poolInternvalInMs: 100, refillThresholdPct: 0.33 }
     );
 
     worker.start();
@@ -270,7 +270,7 @@ describe('task-worker', () => {
           };
         },
       },
-      { maxConcurrency: amountOfTasks, poolInternvalInMs: 60, refillThresholdPct: 0.33 }
+      { maxConcurrency: amountOfTasks, poolInternvalInMs: 100, refillThresholdPct: 0.33 }
     );
 
     const promise = once(ee, 'completed');
