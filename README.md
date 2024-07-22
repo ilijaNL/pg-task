@@ -2,6 +2,26 @@
 
 A SQS like solution build on top of Postgres and NodeJS.
 
+## Features
+
+- At least once or **exactly once** delivery
+- Typesafety
+- Ability to schedule tasks in far future
+- Postgres client agnostic
+- Backpressure-compatible polling workers
+- Task execution log
+- Unique tasks per queue (on at a time enqueued)
+- Exposed query plans for deep integration
+  - no outbox tables needed anymore
+- Multi-master compatible
+- Automatic creation and migration of storage tables
+- Automatic maintenance operations to manage table growth
+
+## Requirements
+
+- Node 18 or higher
+- PostgreSQL 11 or higher
+
 ## Usage
 
 ```
