@@ -27,7 +27,7 @@ describe('plans', () => {
     const plans = createPlans('schema_a');
 
     it('createTasks', () => {
-      const q = plans.createTasks(generateTasks(3, { works: true, value: '123' }));
+      const q = plans.enqueueTasks(generateTasks(3, { works: true, value: '123' }));
       expect(q.text).toMatchInlineSnapshot(`
   "
   SELECT
@@ -105,8 +105,8 @@ describe('plans', () => {
       `);
     });
 
-    it('getAndStartTasks', () => {
-      const q = plans.getAndStartTasks('queue', 20);
+    it('popTasks', () => {
+      const q = plans.popTasks('queue', 20);
       expect(q.text).toMatchInlineSnapshot(`
         "
         SELECT
@@ -230,9 +230,9 @@ describe('plans', () => {
         },
       ];
 
-      await executeQuery(pool, plans.createTasks(tasks));
+      await executeQuery(pool, plans.enqueueTasks(tasks));
 
-      const fetchedTasks = await executeQuery(pool, plans.getAndStartTasks('test-queue', 11));
+      const fetchedTasks = await executeQuery(pool, plans.popTasks('test-queue', 11));
 
       expect(fetchedTasks).toHaveLength(tasks.length);
       expect(fetchedTasks.map((t) => t.data)).toEqual(tasks.map((t) => t.data));
@@ -271,9 +271,9 @@ describe('plans', () => {
         startAfterSeconds: 0,
       };
 
-      await executeQuery(pool, plans.createTasks([task]));
+      await executeQuery(pool, plans.enqueueTasks([task]));
 
-      const fetchedTasks1 = await executeQuery(pool, plans.getAndStartTasks(queue, 11));
+      const fetchedTasks1 = await executeQuery(pool, plans.popTasks(queue, 11));
 
       // fails
       await executeQuery(
@@ -287,13 +287,13 @@ describe('plans', () => {
         )
       );
 
-      const fetchedTasks2 = await executeQuery(pool, plans.getAndStartTasks(queue, 11));
+      const fetchedTasks2 = await executeQuery(pool, plans.popTasks(queue, 11));
 
       expect(fetchedTasks2.length).toBe(0);
 
       await setTimeout(1500);
 
-      const [fetchedTask3] = await executeQuery(pool, plans.getAndStartTasks(queue, 11));
+      const [fetchedTask3] = await executeQuery(pool, plans.popTasks(queue, 11));
 
       expect(fetchedTask3).toBeDefined();
       const succeedTask = fetchedTask3!;
@@ -408,7 +408,7 @@ describe('plans', () => {
       });
 
       const start = process.hrtime();
-      const createTaskQuery = plans.createTasks(taskBatch);
+      const createTaskQuery = plans.enqueueTasks(taskBatch);
       for (let i = 0; i < 2000; ++i) {
         await Promise.all([
           executeQuery(pool, createTaskQuery),
@@ -436,7 +436,7 @@ describe('plans', () => {
         0
       );
 
-      const createTasksQuery = plans.createTasks(taskBatch);
+      const createTasksQuery = plans.enqueueTasks(taskBatch);
       const createPromises = [];
       // create
       for (let i = 0; i < 10000; ++i) {
@@ -445,7 +445,7 @@ describe('plans', () => {
 
       await Promise.all(createPromises);
 
-      const getTaskQuery = plans.getAndStartTasks(taskBatch[0]!.queue, 10);
+      const getTaskQuery = plans.popTasks(taskBatch[0]!.queue, 10);
       const start = process.hrtime();
 
       const getTasksPromises: Promise<SelectedTask[]>[] = [];
@@ -471,7 +471,7 @@ describe('plans', () => {
         0
       );
 
-      const createTasksQuery = plans.createTasks(taskBatch);
+      const createTasksQuery = plans.enqueueTasks(taskBatch);
 
       const createPromises = [];
       // create
@@ -481,7 +481,7 @@ describe('plans', () => {
 
       await Promise.all(createPromises);
 
-      const getTaskQuery = plans.getAndStartTasks(taskBatch[0]!.queue, 50);
+      const getTaskQuery = plans.popTasks(taskBatch[0]!.queue, 50);
 
       const getTasksPromises: Promise<SelectedTask[]>[] = [];
       for (let i = 0; i < 2000; ++i) {

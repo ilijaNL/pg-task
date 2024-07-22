@@ -41,7 +41,7 @@ export const createQueueWorker = <TData = JsonValue>(
   return createTaskWorker(
     {
       async popTasks(amount) {
-        return queryExecutor(sqlPlans.getAndStartTasks(props.queue, amount));
+        return queryExecutor(sqlPlans.popTasks(props.queue, amount));
       },
       async resolveTask(task) {
         await resolveTaskBatcher.add(task);
