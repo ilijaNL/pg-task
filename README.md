@@ -1,5 +1,7 @@
 # pg-task
 
+[![codecov](https://codecov.io/github/ilijaNL/pg-task/graph/badge.svg?token=MQNG1IU5GD)](https://codecov.io/github/ilijaNL/pg-task)
+
 A SQS like solution build on top of Postgres and NodeJS.
 
 ## Features
@@ -10,7 +12,7 @@ A SQS like solution build on top of Postgres and NodeJS.
 - Postgres client agnostic
 - Backpressure-compatible polling workers
 - Task execution log
-- Unique tasks per queue (on at a time enqueued)
+- Unique tasks per queue (one at a time enqueued)
 - Exposed query plans for deep integration
   - no outbox tables needed anymore
 - Multi-master compatible
