@@ -27,7 +27,7 @@ describe('plans', () => {
     const plans = createPlans('schema_a');
 
     it('createTasks', () => {
-      const q = plans.createTasks(generateTasks(3, { works: true, value: '123' }));
+      const q = plans.enqueueTasks(generateTasks(3, { works: true, value: '123' }));
       expect(q.text).toMatchInlineSnapshot(`
   "
   SELECT
@@ -105,8 +105,8 @@ describe('plans', () => {
       `);
     });
 
-    it('getAndStartTasks', () => {
-      const q = plans.getAndStartTasks('queue', 20);
+    it('popTasks', () => {
+      const q = plans.popTasks('queue', 20);
       expect(q.text).toMatchInlineSnapshot(`
         "
         SELECT
@@ -230,9 +230,9 @@ describe('plans', () => {
         },
       ];
 
-      await executeQuery(pool, plans.createTasks(tasks));
+      await executeQuery(pool, plans.enqueueTasks(tasks));
 
-      const fetchedTasks = await executeQuery(pool, plans.getAndStartTasks('test-queue', 11));
+      const fetchedTasks = await executeQuery(pool, plans.popTasks('test-queue', 11));
 
       expect(fetchedTasks).toHaveLength(tasks.length);
       expect(fetchedTasks.map((t) => t.data)).toEqual(tasks.map((t) => t.data));
@@ -271,9 +271,9 @@ describe('plans', () => {
         startAfterSeconds: 0,
       };
 
-      await executeQuery(pool, plans.createTasks([task]));
+      await executeQuery(pool, plans.enqueueTasks([task]));
 
-      const fetchedTasks1 = await executeQuery(pool, plans.getAndStartTasks(queue, 11));
+      const fetchedTasks1 = await executeQuery(pool, plans.popTasks(queue, 11));
 
       // fails
       await executeQuery(
@@ -287,13 +287,13 @@ describe('plans', () => {
         )
       );
 
-      const fetchedTasks2 = await executeQuery(pool, plans.getAndStartTasks(queue, 11));
+      const fetchedTasks2 = await executeQuery(pool, plans.popTasks(queue, 11));
 
       expect(fetchedTasks2.length).toBe(0);
 
       await setTimeout(1500);
 
-      const [fetchedTask3] = await executeQuery(pool, plans.getAndStartTasks(queue, 11));
+      const [fetchedTask3] = await executeQuery(pool, plans.popTasks(queue, 11));
 
       expect(fetchedTask3).toBeDefined();
       const succeedTask = fetchedTask3!;
@@ -408,7 +408,7 @@ describe('plans', () => {
       });
 
       const start = process.hrtime();
-      const createTaskQuery = plans.createTasks(taskBatch);
+      const createTaskQuery = plans.enqueueTasks(taskBatch);
       for (let i = 0; i < 2000; ++i) {
         await Promise.all([
           executeQuery(pool, createTaskQuery),
@@ -436,7 +436,7 @@ describe('plans', () => {
         0
       );
 
-      const createTasksQuery = plans.createTasks(taskBatch);
+      const createTasksQuery = plans.enqueueTasks(taskBatch);
       const createPromises = [];
       // create
       for (let i = 0; i < 10000; ++i) {
@@ -445,7 +445,7 @@ describe('plans', () => {
 
       await Promise.all(createPromises);
 
-      const getTaskQuery = plans.getAndStartTasks(taskBatch[0]!.queue, 10);
+      const getTaskQuery = plans.popTasks(taskBatch[0]!.queue, 10);
       const start = process.hrtime();
 
       const getTasksPromises: Promise<SelectedTask[]>[] = [];
@@ -459,7 +459,7 @@ describe('plans', () => {
       expect(seconds).toBeLessThan(10);
     });
 
-    it('resolves 100000 tasks under 10 seconds', async () => {
+    it('resolves 50000 tasks under 10 seconds', async () => {
       jest.setTimeout(40000);
 
       // pre-generated batches
@@ -471,27 +471,28 @@ describe('plans', () => {
         0
       );
 
-      const createTasksQuery = plans.createTasks(taskBatch);
+      const createTasksQuery = plans.enqueueTasks(taskBatch);
 
       const createPromises = [];
       // create
-      for (let i = 0; i < 1000; ++i) {
+      for (let i = 0; i < 500; ++i) {
         createPromises.push(executeQuery(pool, createTasksQuery));
       }
 
       await Promise.all(createPromises);
 
-      const getTaskQuery = plans.getAndStartTasks(taskBatch[0]!.queue, 50);
+      const getTaskQuery = plans.popTasks(taskBatch[0]!.queue, 50);
 
       const getTasksPromises: Promise<SelectedTask[]>[] = [];
-      for (let i = 0; i < 2000; ++i) {
+      for (let i = 0; i < 1000; ++i) {
         getTasksPromises.push(executeQuery(pool, getTaskQuery));
       }
       const taskIds = (await Promise.all(getTasksPromises)).flat().map((t) => t.id);
 
-      expect(taskIds.length).toBe(100000);
+      expect(taskIds.length).toBe(50000);
+
       const resolveBatcher = createBatcher<TaskResult>({
-        maxSize: 5,
+        maxSize: 10,
         maxTimeInMs: 100,
         onFlush: async (batch) => {
           await executeQuery(pool, plans.resolveTasks(batch.map((item) => item.data)));

@@ -73,7 +73,7 @@ describe('pg worker', () => {
 
     await executeQuery(
       pool,
-      plans.createTasks([
+      plans.enqueueTasks([
         {
           data: { nosmoke: true },
           expireInSeconds: 1,
@@ -94,6 +94,6 @@ describe('pg worker', () => {
     await manager.stop();
 
     // we should not have any pending tasks left
-    await expect(executeQuery(pool, plans.getAndStartTasks(queue, 100))).resolves.toHaveLength(0);
+    await expect(executeQuery(pool, plans.popTasks(queue, 100))).resolves.toHaveLength(0);
   });
 });
