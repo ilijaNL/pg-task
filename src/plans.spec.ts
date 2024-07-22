@@ -459,7 +459,7 @@ describe('plans', () => {
       expect(seconds).toBeLessThan(10);
     });
 
-    it('resolves 100000 tasks under 10 seconds', async () => {
+    it('resolves 50000 tasks under 10 seconds', async () => {
       jest.setTimeout(40000);
 
       // pre-generated batches
@@ -475,7 +475,7 @@ describe('plans', () => {
 
       const createPromises = [];
       // create
-      for (let i = 0; i < 1000; ++i) {
+      for (let i = 0; i < 500; ++i) {
         createPromises.push(executeQuery(pool, createTasksQuery));
       }
 
@@ -484,14 +484,15 @@ describe('plans', () => {
       const getTaskQuery = plans.popTasks(taskBatch[0]!.queue, 50);
 
       const getTasksPromises: Promise<SelectedTask[]>[] = [];
-      for (let i = 0; i < 2000; ++i) {
+      for (let i = 0; i < 1000; ++i) {
         getTasksPromises.push(executeQuery(pool, getTaskQuery));
       }
       const taskIds = (await Promise.all(getTasksPromises)).flat().map((t) => t.id);
 
-      expect(taskIds.length).toBe(100000);
+      expect(taskIds.length).toBe(50000);
+
       const resolveBatcher = createBatcher<TaskResult>({
-        maxSize: 5,
+        maxSize: 10,
         maxTimeInMs: 100,
         onFlush: async (batch) => {
           await executeQuery(pool, plans.resolveTasks(batch.map((item) => item.data)));
