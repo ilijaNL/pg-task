@@ -57,7 +57,7 @@ export const createMaintainceWorker = async (pool: Pool, schema: string, options
         // complete this task, and reschedule it in future
         await transactionExecutor(plans.resolveTasks([{ task_id: id, result: data, state: TaskResultStates.success }]));
         await transactionExecutor(
-          plans.createTasks(
+          plans.enqueueTasks(
             taskFactory([
               {
                 data: null,
@@ -73,7 +73,7 @@ export const createMaintainceWorker = async (pool: Pool, schema: string, options
 
   // ensure we try to create the maintaince tasks always
   await executor(
-    plans.createTasks(
+    plans.enqueueTasks(
       taskFactory([
         {
           data: null,

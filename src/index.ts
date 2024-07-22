@@ -10,4 +10,12 @@ export {
   type TaskResult,
   type TaskResultState,
 } from './task';
+export {
+  executeQuery,
+  type Pool,
+  type ClientFromPool,
+  type QueryClient,
+  type TypedQuery,
+  type QueryResultRow,
+} from './utils/sql';
 export default createManager;

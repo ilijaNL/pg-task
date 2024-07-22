@@ -18,7 +18,7 @@ const itemsToKeys = <T extends Record<string, any>>(items: T[], init: KeysToArr<
   }, init);
 
 export const createPlans = (schema: string) => ({
-  createTasks: (tasks: ConfiguredTask[]) => {
+  enqueueTasks: (tasks: ConfiguredTask[]) => {
     const payload = itemsToKeys(tasks, {
       data: new Array(tasks.length),
       expireInSeconds: new Array(tasks.length),
@@ -49,7 +49,7 @@ FROM ${rawSql(schema)}.create_tasks(
 )
 `;
   },
-  getAndStartTasks: (queue: string, amount: number): TypedQuery<SelectedTask> => {
+  popTasks: (queue: string, amount: number): TypedQuery<SelectedTask> => {
     return sql<{
       id: string;
       data: JsonValue;
