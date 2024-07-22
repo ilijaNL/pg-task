@@ -1,38 +1,35 @@
-name: test
+name: continuous deployment
 
 on:
-  workflow_call:
   pull_request:
     branches:
-      - "main"
-    paths-ignore:
-      - 'docs/**'
-      - 'example/**'
-      - '**/*.md'
+      - main
+  push:
+    branches:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
-  # Label of the container job
   test:
-    # Containers must run in Linux based operating systems
+    uses: ./.github/workflows/ci.yml
+  release:
+    name: Release
+    needs: test
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [18.x, 20.x]
-
+    permissions:
+      id-token: write
+      contents: write
+      packages: write
+      pull-requests: write
+      issues: read
     steps:
       - uses: actions/checkout@v4
-      - name: Use Node.js ${{ matrix.node-version }}
-        id: setup-node
-        uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
         with:
-          version: 8
-
+          node-version: 20.x
       # See https://github.com/actions/setup-node/issues/641#issuecomment-1358859686
       - name: pnpm cache path
         id: pnpm-cache-path
@@ -50,7 +47,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: test
-        run: pnpm run test
-      # - name: ✅ Upload coverage to Codecov
-      #   uses: codecov/codecov-action@v3
+      - name: Create Release Pull Request
+        uses: changesets/action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
