@@ -1,4 +1,4 @@
-name: continuous deployment
+name: cicd
 
 on:
   pull_request:
