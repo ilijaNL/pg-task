@@ -37,6 +37,12 @@ export const createManager = (properties: WorkerManagerProperties): WorkerManage
 
   let startPromise: Promise<void> | null = null;
 
+  const onError = (err: any) => {
+    console.log('pgClient error', err?.message ?? err);
+  };
+
+  pgClient.on('error', onError);
+
   async function init() {
     state = 'starting';
 
@@ -118,6 +124,7 @@ export const createManager = (properties: WorkerManagerProperties): WorkerManage
 
       state = 'idle';
       startPromise = null;
+      pgClient.off('error', onError);
     },
   };
 };
