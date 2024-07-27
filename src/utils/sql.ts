@@ -11,6 +11,12 @@ export type TypedQuery<TRow = QueryResultRow> = {
   [rowTypeSymbol]: TRow;
 };
 
+export interface Notification {
+  processId: number;
+  channel: string;
+  payload?: string | undefined;
+}
+
 export interface QueryClient {
   query(query: string, values?: any[]): Promise<any>;
   query<T = unknown>(props: {
@@ -25,10 +31,16 @@ export interface QueryClient {
 
 export interface Pool extends QueryClient {
   connect(): Promise<ClientFromPool>;
+  on(event: 'error', listener: (...args: any[]) => void): this;
+  off(event: 'error', listener: (...args: any[]) => void): this;
 }
 
 export interface ClientFromPool extends QueryClient {
   release(err?: boolean | Error | undefined): void;
+  on(event: 'notification', listener: (message: Notification) => void): unknown;
+  off(event: 'notification', listener: (message: Notification) => void): any;
+  on(event: 'error', listener: (...args: any[]) => void): unknown;
+  off(event: 'error', listener: (...args: any[]) => void): unknown;
 }
 
 export async function executeQuery<TRowResult extends QueryResultRow>(
@@ -69,12 +81,12 @@ export async function runTransaction<T>(pool: Pool, handler: (client: ClientFrom
 /**
  * Values supported by SQL engine.
  */
-export type Value = unknown;
+type Value = unknown;
 
 /**
  * Supported value or SQL instance.
  */
-export type RawValue = Value | Sql;
+type RawValue = Value | Sql;
 
 /**
  * A SQL instance can be nested within each other to build SQL strings.

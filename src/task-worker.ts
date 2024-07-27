@@ -85,7 +85,10 @@ export const createTaskWorker = (implementation: WorkerImpl, config: TaskWorkerC
     }
 
     const requestedAmount = maxConcurrency - activeTasks.size;
-    const tasks = await implementation.popTasks(requestedAmount);
+    const tasks = await implementation.popTasks(requestedAmount).catch((err) => {
+      console.log('error popping tasks', 'message' in err ? err.message : err);
+      return [] as SelectedTask[];
+    });
 
     // high chance that there are more tasks when requested amount is same as fetched
     probablyHasMoreTasks = tasks.length === requestedAmount;

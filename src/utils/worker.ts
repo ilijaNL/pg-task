@@ -23,7 +23,10 @@ export function createBaseWorker(run: () => Promise<ShouldContinue>, props: { lo
     while (state.polling) {
       const started = Date.now();
       state.executing = true;
-      const shouldContinue = await run();
+      const shouldContinue = await run().catch((err) => {
+        console.log('error in worker loop', err?.message ?? err);
+        return false;
+      });
       state.executing = false;
       const duration = Date.now() - started;
 

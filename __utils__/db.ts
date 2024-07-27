@@ -1,6 +1,6 @@
-import { Pool } from 'pg';
+import { QueryClient } from '../src';
 
-export async function cleanupSchema(pool: Pool, schema: string) {
+export async function cleanupSchema(pool: QueryClient, schema: string) {
   await pool.query(`DROP SCHEMA ${schema} CASCADE`);
 }
 

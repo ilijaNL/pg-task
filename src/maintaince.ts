@@ -35,7 +35,7 @@ export const createMaintainceWorker = async (pool: Pool, schema: string, options
       poolInternvalInMs: 60000,
       onResolve(_, err, _result) {
         if (err) {
-          console.error('failed maintaince task', err);
+          console.log('failed maintaince task', err);
         }
       },
     },
