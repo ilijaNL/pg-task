@@ -8,7 +8,7 @@ describe('migrate', () => {
   let container: StartedPostgreSqlContainer;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer().start();
+    container = await new PostgreSqlContainer('postgres:16.7-alpine').start();
   });
 
   afterAll(async () => {
@@ -26,29 +26,31 @@ describe('migrate', () => {
   });
 
   it('happy path', async () => {
-    await expect(migrate(pool, 'happy_path', ['SELECT 1', 'SELECT 2'])).resolves.toBeUndefined();
+    await expect(migrate(pool, 'happy_path', ['SELECT 1', 'SELECT 2'], 'table')).resolves.toBeUndefined();
   });
 
   it('applies latest migration', async () => {
     const initialMigrations = ['SELECT 1', 'SELECT 2'];
-    await expect(migrate(pool, 'latest_migration', initialMigrations)).resolves.toBeUndefined();
-    await expect(migrate(pool, 'latest_migration', [...initialMigrations, 'SELECT 3'])).resolves.toBeUndefined();
+    await expect(migrate(pool, 'latest_migration', initialMigrations, 'table')).resolves.toBeUndefined();
+    await expect(
+      migrate(pool, 'latest_migration', [...initialMigrations, 'SELECT 3'], 'table')
+    ).resolves.toBeUndefined();
   });
 
   it('applies latest migration only once (concurrency)', async () => {
     const initialMigrations = ['SELECT 1', 'SELECT 2'];
     const schema = 'concurrency';
-    await expect(migrate(pool, schema, initialMigrations)).resolves.toBeUndefined();
+    await expect(migrate(pool, schema, initialMigrations, 'table')).resolves.toBeUndefined();
     await expect(
       Promise.all([
-        new Array(100).fill(() => migrate(pool, schema, [...initialMigrations, 'SELECT 3'])).map((fn) => fn()),
+        new Array(100).fill(() => migrate(pool, schema, [...initialMigrations, 'SELECT 3'], 'table')).map((fn) => fn()),
       ])
     ).resolves.toBeTruthy();
   });
 
   it('throws when migrations have been modified', async () => {
     const schema = 'throws';
-    await expect(migrate(pool, schema, ['SELECT 1', 'SELECT 2'])).resolves.toBeUndefined();
-    await expect(migrate(pool, schema, ['SELECT 2', 'SELECT 2'])).rejects.toBeTruthy();
+    await expect(migrate(pool, schema, ['SELECT 1', 'SELECT 2'], 'table')).resolves.toBeUndefined();
+    await expect(migrate(pool, schema, ['SELECT 2', 'SELECT 2'], 'table')).rejects.toBeTruthy();
   });
 });

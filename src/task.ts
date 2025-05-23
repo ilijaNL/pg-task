@@ -1,11 +1,10 @@
 import { JsonValue } from './utils/common';
 
-export const TaskResultStates = {
+export const TaskResultStates = Object.freeze({
   success: 0,
-  fail: 1,
-  cancel: 2,
-  expire: 3,
-} as const;
+  failed: 1,
+  // cancelled: 2,
+});
 
 export type TaskResultState = (typeof TaskResultStates)[keyof typeof TaskResultStates];
 
@@ -13,7 +12,7 @@ export type SelectedTask = {
   id: string;
   data: JsonValue;
   meta_data: JsonValue;
-  created_on: string;
+  created_on: Date;
   expire_in: number;
   attempt: number;
   queue: string;

@@ -43,7 +43,7 @@
   "sideEffects": false,
   "devDependencies": {
     "@changesets/cli": "^2.27.7",
-    "@testcontainers/postgresql": "^10.10.3",
+    "@testcontainers/postgresql": "^10.18.0",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.14.10",
     "@types/pg": "^8.11.6",

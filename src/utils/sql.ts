@@ -2,7 +2,7 @@ export interface QueryResultRow {
   [column: string]: unknown;
 }
 
-const rowTypeSymbol = Symbol('rowTypeSymbol');
+declare const rowTypeSymbol: unique symbol;
 
 export type TypedQuery<TRow = QueryResultRow> = {
   text: string;

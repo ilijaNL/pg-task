@@ -18,7 +18,7 @@ const itemsToKeys = <T extends Record<string, any>>(items: T[], init: KeysToArr<
   }, init);
 
 export const createPlans = (schema: string) => ({
-  enqueueTasks: (tasks: ConfiguredTask[]) => {
+  enqueueTasks: (...tasks: ConfiguredTask[]) => {
     const payload = itemsToKeys(tasks, {
       data: new Array(tasks.length),
       expireInSeconds: new Array(tasks.length),
@@ -54,7 +54,7 @@ FROM ${rawSql(schema)}.create_tasks(
       id: string;
       data: JsonValue;
       meta_data: JsonValue;
-      created_on: string;
+      created_on: Date;
       expire_in: number;
       attempt: number;
       queue: string;
@@ -78,11 +78,11 @@ FROM ${rawSql(schema)}.get_tasks(${queue}, ${amount}::integer)`;
    * @param results
    * @returns
    */
-  resolveTasks: (results: Array<TaskResult>) => {
-    const payload = itemsToKeys(results, {
-      result: new Array(results.length),
-      state: new Array(results.length),
-      task_id: new Array(results.length),
+  resolveTasks: (...taskResult: Array<TaskResult>) => {
+    const payload = itemsToKeys(taskResult, {
+      result: new Array(taskResult.length),
+      state: new Array(taskResult.length),
+      task_id: new Array(taskResult.length),
     });
 
     return sql<{
@@ -96,7 +96,12 @@ FROM ${rawSql(schema)}.resolve_tasks(
   ${payload.result}::jsonb[]
 )`;
   },
-  expireTasks: (afterSeconds: number) => sql`SELECT ${rawSql(schema)}.expire_tasks(${afterSeconds}::integer)`,
+  /**
+   * Removes tasks that are probably will not be picked up because it is already visible for atleast `afterSeconds`.
+   */
+  removeDanglingTasks: (afterSeconds: number) =>
+    sql`SELECT ${rawSql(schema)}.remove_dangling_tasks(${afterSeconds}::integer)`,
+  failMaxAttemptsTasks: () => sql`SELECT ${rawSql(schema)}.fail_max_attempts()`,
   getTaskExecutionLog: (taskId: string) => sql<{
     id: string;
     task_id: string;

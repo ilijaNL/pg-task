@@ -1,17 +1,24 @@
 import { createMaintainceWorker } from './maintaince';
 import { createMigrations } from './migrations';
 import { QueueWorkerConfig, createQueueWorker } from './queue-worker';
-import type { TaskWorker, TaskWorkerConfig } from './task-worker';
+import type { TaskWorkerConfig } from './task-worker';
 import { SECONDS_IN_DAY } from './utils/common';
 import { migrate } from './utils/migrate';
 import type { Pool } from './utils/sql';
+import type { Worker } from './utils/worker';
 
 const brandSymbol = Symbol('brand');
 type WorkerId = number & { [brandSymbol]: 'WorkerId' };
 
+export type RegisteredWorker = {
+  workerId: WorkerId;
+  start: () => void;
+  stop: () => Promise<void>;
+};
+
 export interface WorkerManager {
   start(): Promise<void>;
-  register<TData>(props: QueueWorkerConfig<TData>): Promise<WorkerId>;
+  register<TData>(props: QueueWorkerConfig<TData>): Promise<RegisteredWorker>;
   notifyWorker(workerId: WorkerId): void;
   stopWorker(workerId: WorkerId): Promise<void>;
   stop(): Promise<void>;
@@ -25,12 +32,13 @@ export type WorkerManagerProperties = {
     clearStalledTasksAfterSeconds: number;
     deleteArchivedAfterSeonds: number;
   }>;
+  migrationTable?: string;
   defaultWorkerConfig?: Partial<TaskWorkerConfig>;
 };
 
 export const createManager = (properties: WorkerManagerProperties): WorkerManager => {
-  const { pgClient, schema, defaultWorkerConfig } = properties;
-  const workers = new Map<WorkerId, TaskWorker>();
+  const { pgClient, schema, defaultWorkerConfig, migrationTable = '_pg_task_migrations' } = properties;
+  const workers = new Map<WorkerId, Worker>();
   let workerCount = 0;
 
   let state: 'starting' | 'running' | 'stopping' | 'idle' = 'idle';
@@ -48,13 +56,14 @@ export const createManager = (properties: WorkerManagerProperties): WorkerManage
 
     const allMigrations = createMigrations(properties.schema);
 
-    await migrate(pgClient, schema, allMigrations);
+    await migrate(pgClient, schema, allMigrations, migrationTable);
 
     if (properties.maintainceWorker?.disabled !== true) {
-      startWorker(
+      registerAndStartWorker(
         await createMaintainceWorker(pgClient, schema, {
           clearStalledAfterSeconds: properties.maintainceWorker?.clearStalledTasksAfterSeconds ?? SECONDS_IN_DAY * 7,
           clearExecutionLogsAfterSeconds: properties.maintainceWorker?.deleteArchivedAfterSeonds ?? SECONDS_IN_DAY * 30,
+          clearMaxAttemptsInterval: 60,
         })
       );
     }
@@ -69,7 +78,7 @@ export const createManager = (properties: WorkerManagerProperties): WorkerManage
     return startPromise;
   }
 
-  function startWorker<TData>(queueWorkerConfig: QueueWorkerConfig<TData>): WorkerId {
+  function registerAndStartWorker<TData>(queueWorkerConfig: QueueWorkerConfig<TData>): RegisteredWorker {
     const workerOptions = Object.assign({}, defaultWorkerConfig, queueWorkerConfig.options);
 
     const worker = createQueueWorker(
@@ -87,19 +96,26 @@ export const createManager = (properties: WorkerManagerProperties): WorkerManage
     worker.start();
     workers.set(workerId, worker);
 
-    return workerId;
-  }
-
-  async function register<TData>(config: QueueWorkerConfig<TData>): Promise<WorkerId> {
-    await ensureStarted();
-    return startWorker(config);
+    return {
+      workerId,
+      stop: () => worker.stop(),
+      start: () => worker.start(),
+    };
   }
 
   return {
     start() {
       return ensureStarted();
     },
-    register,
+    async register<TData>(config: QueueWorkerConfig<TData>): Promise<RegisteredWorker> {
+      // we can only start if not stopping
+      if (state === 'stopping') {
+        throw new Error('cannot register worker when manager is stopping');
+      }
+
+      await ensureStarted();
+      return registerAndStartWorker(config);
+    },
     notifyWorker(workerId) {
       workers.get(workerId)?.notify();
     },
@@ -110,7 +126,8 @@ export const createManager = (properties: WorkerManagerProperties): WorkerManage
       }
 
       await worker.stop();
-      workers.delete(workerId);
+      // we don't need to delete since id is always incremental
+      // workers.delete(workerId);
     },
     async stop() {
       if (state === 'stopping') {

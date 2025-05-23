@@ -10,12 +10,10 @@ type Migration = {
   sql: string;
 };
 
-const migrationTable = '_pg_task_migrations';
-
 /**
  * Migration which creates tracking table
  */
-const createInitialMigration = (schema: string) => `
+const createInitialMigration = (schema: string, migrationTable: string) => `
   CREATE SCHEMA IF NOT EXISTS ${schema};
 
   CREATE TABLE IF NOT EXISTS ${schema}."${migrationTable}" (
@@ -65,7 +63,7 @@ This means that the createMigrationStore items have changed since it was applied
   }
 }
 
-const createMigrationPlans = (schema: string) => {
+const createMigrationPlans = (schema: string, migrationTable: string) => {
   function getMigrations() {
     return sql<{ id: number; name: string; hash: string }>`
       SELECT id, name, hash FROM ${rawSql(schema)}.${rawSql(migrationTable)} ORDER BY id
@@ -96,11 +94,11 @@ const createMigrationPlans = (schema: string) => {
   };
 };
 
-export async function migrate(pool: Pool, schema: string, migrations: string[]) {
-  const allMigrations = loadMigrations([createInitialMigration(schema), ...migrations]);
+export async function migrate(pool: Pool, schema: string, migrations: string[], migrationTable: string) {
+  const allMigrations = loadMigrations([createInitialMigration(schema, migrationTable), ...migrations]);
   let toApply = [...allMigrations];
   // check if table exists
-  const plans = createMigrationPlans(schema);
+  const plans = createMigrationPlans(schema, migrationTable);
 
   await runTransaction(pool, async (client) => {
     const executor = createQueryExecutor(client);

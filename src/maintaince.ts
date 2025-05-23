@@ -2,16 +2,22 @@ import { createPlans, TASK_EXECUTION_TABLE } from './plans';
 import { QueueWorkerConfig } from './queue-worker';
 import { createTaskQueueFactory, TaskResultStates } from './task';
 import { SECONDS_IN_HOUR } from './utils/common';
-import { createQueryExecutor, Pool, rawSql, runTransaction, sql } from './utils/sql';
+import { createQueryExecutor, Pool, rawSql, runTransaction, sql, TypedQuery } from './utils/sql';
 
 export const maintainceQueue = '__pg_task_maintaince__';
 
 export type MaintainceOptions = {
   clearExecutionLogsAfterSeconds: number;
   clearStalledAfterSeconds: number;
+  // in seconds
+  clearMaxAttemptsInterval: number;
 };
 
-export const createMaintainceWorker = async (pool: Pool, schema: string, options: MaintainceOptions) => {
+export const createMaintainceWorker = async (
+  pool: Pool,
+  schema: string,
+  options: MaintainceOptions
+): Promise<QueueWorkerConfig<any>> => {
   const plans = createPlans(schema);
   const executor = createQueryExecutor(pool);
 
@@ -20,49 +26,67 @@ export const createMaintainceWorker = async (pool: Pool, schema: string, options
     expireInSeconds: 300,
   });
 
-  const { clearExecutionLogsAfterSeconds, clearStalledAfterSeconds } = options;
-
-  const expireTaskQuery = plans.expireTasks(clearStalledAfterSeconds);
-  const clearExecutionLogsQuery = sql`DELETE FROM ${rawSql(schema)}.${rawSql(TASK_EXECUTION_TABLE)} WHERE recorded_at < (now() - (interval '1s' * ${clearExecutionLogsAfterSeconds}))`;
-  const expireTaskKey = 'expire_tasks';
-  const executionLogsKey = 'clear_execution_log';
+  const maintainceTasks: Array<{
+    singletonKey: `__internal_${string}`;
+    query: TypedQuery;
+    intervalInSec: number;
+  }> = [
+    {
+      singletonKey: '__internal_expire_tasks',
+      intervalInSec: SECONDS_IN_HOUR * 12,
+      query: plans.removeDanglingTasks(options.clearStalledAfterSeconds),
+    },
+    {
+      singletonKey: '__internal_clear_execution_log',
+      intervalInSec: SECONDS_IN_HOUR * 12,
+      query: sql`
+        DELETE FROM ${rawSql(schema)}.${rawSql(TASK_EXECUTION_TABLE)} 
+        WHERE recorded_at < (now() - (interval '1s' * ${options.clearExecutionLogsAfterSeconds}))
+      `,
+    },
+    {
+      singletonKey: '__internal_clear_max_attemps',
+      intervalInSec: options.clearMaxAttemptsInterval,
+      query: plans.failMaxAttemptsTasks(),
+    },
+  ];
 
   const queueWorkerConfig: QueueWorkerConfig<any> = {
     queue: maintainceQueue,
     options: {
       maxConcurrency: 1,
       refillThresholdPct: 0,
-      poolInternvalInMs: 60000,
+      poolInternvalInMs: 30_000,
       onResolve(_, err, _result) {
         if (err) {
-          console.log('failed maintaince task', err);
+          console.warn('failed maintaince task', err);
         }
       },
     },
     async handler(data, { id, singleton_key }) {
       await runTransaction(pool, async (trx) => {
-        const transactionExecutor = createQueryExecutor(trx);
-
-        switch (singleton_key) {
-          case executionLogsKey: {
-            await transactionExecutor(clearExecutionLogsQuery);
-            break;
-          }
-          case expireTaskKey: {
-            await transactionExecutor(expireTaskQuery);
-            break;
-          }
+        if (singleton_key === null) {
+          return;
         }
 
+        const taskToExecute = maintainceTasks.find((t) => t.singletonKey === singleton_key);
+
+        if (!taskToExecute) {
+          return;
+        }
+
+        const qExecutor = createQueryExecutor(trx);
+        await qExecutor(taskToExecute.query);
+
         // complete this task, and reschedule it in future
-        await transactionExecutor(plans.resolveTasks([{ task_id: id, result: data, state: TaskResultStates.success }]));
-        await transactionExecutor(
+        await qExecutor(plans.resolveTasks({ task_id: id, result: data, state: TaskResultStates.success }));
+        await qExecutor(
           plans.enqueueTasks(
-            taskFactory([
+            ...taskFactory([
               {
-                data: null,
+                data: data,
                 singletonKey: singleton_key,
-                startAfterSeconds: SECONDS_IN_HOUR * 12,
+                startAfterSeconds: taskToExecute.intervalInSec,
               },
             ])
           )
@@ -74,18 +98,13 @@ export const createMaintainceWorker = async (pool: Pool, schema: string, options
   // ensure we try to create the maintaince tasks always
   await executor(
     plans.enqueueTasks(
-      taskFactory([
-        {
+      ...taskFactory(
+        maintainceTasks.map((t) => ({
           data: null,
-          singletonKey: executionLogsKey,
+          singletonKey: t.singletonKey,
           startAfterSeconds: 0,
-        },
-        {
-          data: null,
-          singletonKey: expireTaskKey,
-          startAfterSeconds: 0,
-        },
-      ])
+        }))
+      )
     )
   );
 

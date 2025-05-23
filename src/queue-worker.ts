@@ -28,7 +28,7 @@ export const createQueueWorker = <TData = JsonValue>(
 
   const resolveTaskBatcher = createBatcher<TaskResult>({
     async onFlush(batch) {
-      await queryExecutor(sqlPlans.resolveTasks(batch.map((i) => i.data)));
+      await queryExecutor(sqlPlans.resolveTasks(...batch.map((i) => i.data)));
     },
     // dont make to big since payload can be big
     maxSize: 25,

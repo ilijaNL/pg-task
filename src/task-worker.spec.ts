@@ -60,7 +60,7 @@ describe('task-worker', () => {
         async resolveTask(task) {
           expect(task.task_id).toBe('1');
           expect((task.result as any)?.message).toBe('throwed');
-          expect(task.state).toBe(TaskResultStates.fail);
+          expect(task.state).toBe(TaskResultStates.failed);
           ee.emit('resolved');
         },
         async handler() {
@@ -200,7 +200,7 @@ describe('task-worker', () => {
           return [
             {
               attempt: 1,
-              created_on: new Date().toISOString(),
+              created_on: new Date(),
               data: {},
               expire_in: 0.1,
               id: '1',
@@ -214,7 +214,7 @@ describe('task-worker', () => {
         },
         async resolveTask(task) {
           // should fail
-          expect(task.state).toBe(TaskResultStates.fail);
+          expect(task.state).toBe(TaskResultStates.failed);
           ee.emit('completed');
         },
         async handler() {
@@ -243,7 +243,7 @@ describe('task-worker', () => {
           return [
             {
               attempt: 1,
-              created_on: new Date().toISOString(),
+              created_on: new Date(),
               data: {},
               expire_in: 100,
               id: '1',
@@ -257,7 +257,7 @@ describe('task-worker', () => {
         },
         async resolveTask(task) {
           // should fail
-          expect(task.state).toBe(TaskResultStates.fail);
+          expect(task.state).toBe(TaskResultStates.failed);
           expect(task.result).toEqual({ value: 'works' });
           ee.emit('completed');
         },

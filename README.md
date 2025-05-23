@@ -56,14 +56,14 @@ const taskFactory = createTaskQueueFactory('worker-queue');
 await executeQuery(
   pool,
   plans.enqueueTasks(
-    taskFactory([
+    taskFactory(
       {
         data: { somepayload: 'test' },
       },
       {
         data: { somepayload: 'test' },
-      },
-    ])
+      }
+    )
   )
 );
 

@@ -1,11 +1,17 @@
 import { TASK_EXECUTION_TABLE, TASK_TABLE } from './plans';
 import { TaskResultStates } from './task';
 
-const nextVisibility = (taskTable: string) => `now() + (CASE WHEN ${taskTable}.retry_backoff 
-  then 
-    interval '1s' * (${taskTable}.retry_delay * (2 ^ LEAST(12, ${taskTable}.attempt + 1)))
-  else (interval '1s' * ${taskTable}.retry_delay)
-end)`;
+// calculates the next visibility
+const nextVisibility = (
+  taskTable: string,
+  rescheduling: boolean
+) => `now() + ${!rescheduling ? `(interval '1s' * ${taskTable}.expire_in) +` : ''} (
+  CASE WHEN ${taskTable}.retry_backoff 
+    then 
+      interval '1s' * (${taskTable}.retry_delay * (2 ^ LEAST(12, ${taskTable}.attempt + 1)))
+    else (interval '1s' * ${taskTable}.retry_delay)
+  end
+)`;
 
 export const createMigrations = (schema: string) => [
   `
@@ -41,7 +47,8 @@ export const createMigrations = (schema: string) => [
   ) -- https://www.cybertec-postgresql.com/en/what-is-fillfactor-and-how-does-it-affect-postgresql-performance/
   WITH (fillfactor=90);
 
-  CREATE INDEX ON ${schema}.${TASK_TABLE} (queue, visible_at) INCLUDE (id);
+  -- fetching tasks
+  CREATE INDEX ON ${schema}.${TASK_TABLE} (queue, visible_at) INCLUDE (id, attempt, max_attempts);
 
   -- singleton task, which is per queue
   CREATE UNIQUE INDEX ON ${schema}.${TASK_TABLE} (queue, singleton_key) where singleton_key is not null;
@@ -74,28 +81,30 @@ export const createMigrations = (schema: string) => [
   CREATE INDEX ON ${schema}.${TASK_EXECUTION_TABLE} (task_id);
 `,
   `
+  -- 
   CREATE OR REPLACE FUNCTION ${schema}.get_tasks(target_q text, amount integer)
     RETURNS SETOF ${schema}.${TASK_TABLE} AS $$
     BEGIN
       RETURN QUERY
-      with _tasks as (
+      with visible_tasks as (
         SELECT
           _tasks.id as id
         FROM ${schema}.${TASK_TABLE} _tasks
         WHERE _tasks.queue = target_q 
           AND _tasks.visible_at < now()
+          AND _tasks.attempt < _tasks.max_attempts
         ORDER BY _tasks.visible_at ASC
         LIMIT amount
         FOR UPDATE SKIP LOCKED
       ) UPDATE ${schema}.${TASK_TABLE} t 
         SET
           -- this is total of expire and retry delay
-          visible_at = ${nextVisibility('t')},
+          visible_at = ${nextVisibility('t', false)},
           started_on = now(),
           _version = t._version + 1,
           attempt = t.attempt + 1
-        FROM _tasks
-        WHERE t.id = _tasks.id
+        FROM visible_tasks
+        WHERE t.id = visible_tasks.id
         RETURNING t.*;
     END
   $$ LANGUAGE 'plpgsql';
@@ -178,13 +187,13 @@ export const createMigrations = (schema: string) => [
         incoming.result
       FROM ${schema}.${TASK_TABLE} tb
         INNER JOIN incoming ON incoming.id = tb.id
-    ), retried AS (
+    ), rescheduled AS ( -- reschedule tasks that fail or are expired
       UPDATE ${schema}.${TASK_TABLE} tt
       SET 
-        visible_at = ${nextVisibility('tt')},
+        visible_at = ${nextVisibility('tt', true)},
         _version = tt._version + 1
       FROM incoming
-      WHERE incoming.state = ${TaskResultStates.fail}
+      WHERE incoming.state = ${TaskResultStates.failed}
         AND tt.id = incoming.id 
         AND tt.attempt < tt.max_attempts
       RETURNING tt.id
@@ -192,7 +201,7 @@ export const createMigrations = (schema: string) => [
       DELETE FROM ${schema}.${TASK_TABLE} dt
       WHERE id in (
         select id from incoming 
-          where incoming.id not in (select id from retried)
+          where incoming.id not in (select id from rescheduled)
       )
       returning dt.id
     ) SELECT deleted.id from deleted;
@@ -200,7 +209,8 @@ export const createMigrations = (schema: string) => [
   $$ LANGUAGE 'plpgsql' VOLATILE;
 `,
   `
-CREATE FUNCTION ${schema}.expire_tasks(after_seconds integer)
+-- Cleanup function 
+CREATE FUNCTION ${schema}.remove_dangling_tasks(after_seconds integer)
   RETURNS void AS $$
     BEGIN
     PERFORM ${schema}.resolve_tasks(
@@ -210,13 +220,35 @@ CREATE FUNCTION ${schema}.expire_tasks(after_seconds integer)
     ) FROM (
       SELECT
         _tasks.id id,
-        ${TaskResultStates.expire}::smallint s,
+        ${TaskResultStates.failed}::smallint s,
         null::jsonb d
       FROM ${schema}.${TASK_TABLE} _tasks
       WHERE _tasks.visible_at < (now() - (interval '1s' * after_seconds))
       -- lock the rows which are going to be resolved
       FOR UPDATE SKIP LOCKED
     ) _expired;
+    END;
+  $$ LANGUAGE 'plpgsql' VOLATILE;
+
+-- Cleanup function 
+CREATE FUNCTION ${schema}.fail_max_attempts()
+  RETURNS void AS $$
+    BEGIN
+    PERFORM ${schema}.resolve_tasks(
+      ARRAY_AGG(failed_tasks.id), 
+      ARRAY_AGG(failed_tasks.s), 
+      ARRAY_AGG(failed_tasks.d)
+    ) FROM (
+      SELECT
+        _tasks.id id,
+        ${TaskResultStates.failed}::smallint s,
+        null::jsonb d
+      FROM ${schema}.${TASK_TABLE} _tasks
+      WHERE _tasks.visible_at < now()
+        AND _tasks.attempt >= _tasks.max_attempts
+      -- lock the rows which are going to be resolved
+      FOR UPDATE SKIP LOCKED
+    ) failed_tasks;
     END;
   $$ LANGUAGE 'plpgsql' VOLATILE;
 `,

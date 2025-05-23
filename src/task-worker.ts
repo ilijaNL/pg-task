@@ -34,7 +34,7 @@ export interface TaskWorker extends Worker {
 export type TaskContext = {
   id: string;
   meta_data: JsonValue;
-  created_on: string;
+  created_on: Date;
   expire_in: number;
   attempt: number;
   queue: string;
@@ -60,19 +60,19 @@ export const createTaskWorker = (implementation: WorkerImpl, config: TaskWorkerC
   async function resolveTask(task: SelectedTask, err: unknown, result?: unknown) {
     await implementation.resolveTask({
       result: mapCompletionDataArg(err ?? result),
-      state: err === null ? TaskResultStates.success : TaskResultStates.fail,
+      state: err === null ? TaskResultStates.success : TaskResultStates.failed,
       task_id: task.id,
     });
-
-    config?.onResolve?.(task, err, result);
 
     activeTasks.delete(task.id);
 
     // if some treshhold is reached, we can refetch
     const threshHoldPct = refillThresholdPct;
     if (probablyHasMoreTasks && activeTasks.size / maxConcurrency <= threshHoldPct) {
-      taskWorker.notify();
+      worker.notify();
     }
+
+    config?.onResolve?.(task, err, result);
   }
 
   function isFull() {
@@ -120,19 +120,19 @@ export const createTaskWorker = (implementation: WorkerImpl, config: TaskWorkerC
     });
   }
 
-  const taskWorker = createBaseWorker(loop, { loopInterval: poolInternvalInMs });
+  const worker = createBaseWorker(loop, { loopInterval: poolInternvalInMs });
 
   return {
-    ...taskWorker,
+    ...worker,
     isIdle() {
-      return !taskWorker.working() && !isFull();
+      return !worker.working() && !isFull();
     },
     /* istanbul ignore next */
     get activeTasks() {
       return activeTasks.size;
     },
     async stop() {
-      await taskWorker.stop();
+      await worker.stop();
       await Promise.all(Array.from(activeTasks.values()));
     },
   };

@@ -8,6 +8,7 @@ import { migrate } from './utils/migrate';
 import { createMigrations } from './migrations';
 import { setTimeout } from 'timers/promises';
 import { createBatcher } from 'node-batcher';
+import { randomUUID } from 'crypto';
 
 const generateTasks = (amount: number, data: Task['data'], startAfterSeconds = 100): Array<ConfiguredTask> =>
   new Array(amount).fill({
@@ -27,7 +28,7 @@ describe('plans', () => {
     const plans = createPlans('schema_a');
 
     it('createTasks', () => {
-      const q = plans.enqueueTasks(generateTasks(3, { works: true, value: '123' }));
+      const q = plans.enqueueTasks(...generateTasks(3, { works: true, value: '123' }));
       expect(q.text).toMatchInlineSnapshot(`
   "
   SELECT
@@ -130,10 +131,10 @@ describe('plans', () => {
     });
 
     it('resolveTasks', () => {
-      const q = plans.resolveTasks([
-        { result: { nested: 'string', item: { a: true } }, state: TaskResultStates.fail, task_id: '12313' },
-        { result: { nested: 'string', item: { a: true } }, state: TaskResultStates.fail, task_id: '2222' },
-      ]);
+      const q = plans.resolveTasks(
+        { result: { nested: 'string', item: { a: true } }, state: TaskResultStates.failed, task_id: '12313' },
+        { result: { nested: 'string', item: { a: true } }, state: TaskResultStates.failed, task_id: '2222' }
+      );
 
       expect(q.text).toMatchInlineSnapshot(`
         "
@@ -183,7 +184,7 @@ describe('plans', () => {
     let plans: ReturnType<typeof createPlans>;
 
     beforeAll(async () => {
-      container = await new PostgreSqlContainer().start();
+      container = await new PostgreSqlContainer('postgres:16.7-alpine').start();
     });
 
     afterAll(async () => {
@@ -196,7 +197,7 @@ describe('plans', () => {
       });
       schema = createRandomSchema();
       plans = createPlans(schema);
-      await migrate(pool, schema, createMigrations(schema));
+      await migrate(pool, schema, createMigrations(schema), 'migrations');
     });
 
     afterEach(async () => {
@@ -230,9 +231,9 @@ describe('plans', () => {
         },
       ];
 
-      await executeQuery(pool, plans.enqueueTasks(tasks));
+      await executeQuery(pool, plans.enqueueTasks(...tasks));
 
-      const fetchedTasks = await executeQuery(pool, plans.popTasks('test-queue', 11));
+      const fetchedTasks = await executeQuery(pool, plans.popTasks('test-queue', 100));
 
       expect(fetchedTasks).toHaveLength(tasks.length);
       expect(fetchedTasks.map((t) => t.data)).toEqual(tasks.map((t) => t.data));
@@ -240,7 +241,7 @@ describe('plans', () => {
       await executeQuery(
         pool,
         plans.resolveTasks(
-          fetchedTasks.map((t) => ({
+          ...fetchedTasks.map((t) => ({
             task_id: t.id,
             result: { resolved: true },
             state: TaskResultStates.success,
@@ -271,7 +272,7 @@ describe('plans', () => {
         startAfterSeconds: 0,
       };
 
-      await executeQuery(pool, plans.enqueueTasks([task]));
+      await executeQuery(pool, plans.enqueueTasks(task));
 
       const fetchedTasks1 = await executeQuery(pool, plans.popTasks(queue, 11));
 
@@ -279,10 +280,10 @@ describe('plans', () => {
       await executeQuery(
         pool,
         plans.resolveTasks(
-          fetchedTasks1.map((t) => ({
+          ...fetchedTasks1.map((t) => ({
             task_id: t.id,
             result: { resolved: false },
-            state: TaskResultStates.fail,
+            state: TaskResultStates.failed,
           }))
         )
       );
@@ -301,13 +302,11 @@ describe('plans', () => {
       // success
       await executeQuery(
         pool,
-        plans.resolveTasks([
-          {
-            task_id: succeedTask.id,
-            result: { resolved: true },
-            state: TaskResultStates.success,
-          },
-        ])
+        plans.resolveTasks({
+          task_id: succeedTask.id,
+          result: { resolved: true },
+          state: TaskResultStates.success,
+        })
       );
 
       const taskExecutionLog = await executeQuery(pool, plans.getTaskExecutionLog(succeedTask.id));
@@ -342,7 +341,7 @@ describe('plans', () => {
           result: {
             resolved: false,
           },
-          state: TaskResultStates.fail,
+          state: TaskResultStates.failed,
         },
         {
           task_id: succeedTask.id,
@@ -366,6 +365,164 @@ describe('plans', () => {
         },
       ]);
     });
+
+    it('pops tasks once', async () => {
+      const queue = 'test-queue';
+      const now = Date.now();
+      const task = {
+        data: { now },
+        expireInSeconds: 100,
+        maxAttempts: 3,
+        metaData: {},
+        queue,
+        retryBackoff: false,
+        retryDelayInSeconds: 1,
+        singletonKey: null,
+        startAfterSeconds: 0,
+      };
+
+      await executeQuery(pool, plans.enqueueTasks(task));
+
+      const result = await Promise.all([
+        executeQuery(pool, plans.popTasks(queue, 20)),
+        executeQuery(pool, plans.popTasks(queue, 20)),
+        executeQuery(pool, plans.popTasks(queue, 20)),
+        executeQuery(pool, plans.popTasks(queue, 20)),
+        executeQuery(pool, plans.popTasks(queue, 20)),
+      ]);
+
+      const results = result.flat();
+
+      expect(results.length).toBe(1);
+    });
+
+    it('does not pop tasks that have max attempt reached', async () => {
+      const queue = 'test-queue';
+      const now = Date.now();
+      const task = {
+        data: { now },
+        expireInSeconds: 1,
+        maxAttempts: 1,
+        metaData: {},
+        queue,
+        retryBackoff: false,
+        retryDelayInSeconds: 0,
+        singletonKey: null,
+        startAfterSeconds: 0,
+      };
+
+      await executeQuery(pool, plans.enqueueTasks(task));
+
+      {
+        const tasks = await executeQuery(pool, plans.popTasks(queue, 20));
+        expect(tasks.length).toBe(1);
+      }
+
+      await setTimeout(1000);
+
+      {
+        const tasks = await executeQuery(pool, plans.popTasks(queue, 20));
+        expect(tasks.length).toBe(0);
+      }
+    });
+
+    it('does pop tasks that have max attempt **not** reached', async () => {
+      const queue = 'test-queue';
+      const now = Date.now();
+      const task = {
+        data: { now },
+        expireInSeconds: 1,
+        maxAttempts: 2,
+        metaData: {},
+        queue,
+        retryBackoff: false,
+        retryDelayInSeconds: 0,
+        singletonKey: null,
+        startAfterSeconds: 0,
+      };
+
+      await executeQuery(pool, plans.enqueueTasks(task));
+
+      {
+        const tasks = await executeQuery(pool, plans.popTasks(queue, 20));
+        expect(tasks.length).toBe(1);
+      }
+
+      await setTimeout(1000);
+
+      {
+        const tasks = await executeQuery(pool, plans.popTasks(queue, 20));
+        expect(tasks).toEqual([
+          {
+            attempt: 2,
+            created_on: expect.any(Date),
+            data: {
+              now,
+            },
+            expire_in: 1,
+            id: '1',
+            max_attempts: 2,
+            meta_data: {},
+            queue,
+            singleton_key: null,
+          },
+        ]);
+      }
+    });
+
+    it('cleanups tasks when only max attempts reached', async () => {
+      const queue = randomUUID();
+      const now = Date.now();
+      const task = {
+        data: { now },
+        expireInSeconds: 1,
+        maxAttempts: 2,
+        metaData: {},
+        queue,
+        retryBackoff: false,
+        retryDelayInSeconds: 0,
+        singletonKey: null,
+        startAfterSeconds: 0,
+      };
+
+      const [createdTask] = await executeQuery(pool, plans.enqueueTasks(task));
+
+      {
+        const tasks = await executeQuery(pool, plans.popTasks(queue, 20));
+        expect(tasks).toHaveLength(1);
+      }
+
+      // wait for task to expire
+      await setTimeout(1000);
+
+      // try to clean up
+      await executeQuery(pool, plans.failMaxAttemptsTasks());
+
+      // expect executionlog to be empty since it is never resolved
+      {
+        const taskExecutionLog = await executeQuery(pool, plans.getTaskExecutionLog(createdTask!.task_id));
+        expect(taskExecutionLog).toHaveLength(0);
+      }
+
+      // task should still exist
+      {
+        const tasks = await executeQuery(pool, plans.popTasks(queue, 20));
+        expect(tasks).toHaveLength(1);
+      }
+
+      // wait for task to expire again
+      await setTimeout(1000);
+
+      await executeQuery(pool, plans.failMaxAttemptsTasks());
+
+      // we expect to have exection log now since removeMaxAttemptsTasks resolves the task as failed
+      {
+        const taskExecutionLog = await executeQuery(pool, plans.getTaskExecutionLog(createdTask!.task_id));
+        expect(taskExecutionLog).toHaveLength(1);
+        expect(taskExecutionLog[0]).toHaveProperty('state', TaskResultStates.failed);
+        expect(taskExecutionLog[0]).toHaveProperty('attempt', 2);
+      }
+    });
   });
 
   describe('performance', () => {
@@ -376,7 +533,7 @@ describe('plans', () => {
     let plans: ReturnType<typeof createPlans>;
 
     beforeAll(async () => {
-      container = await new PostgreSqlContainer().start();
+      container = await new PostgreSqlContainer('postgres:16.7-alpine').start();
     });
 
     afterAll(async () => {
@@ -391,7 +548,7 @@ describe('plans', () => {
       });
       schema = createRandomSchema();
       plans = createPlans(schema);
-      await migrate(pool, schema, createMigrations(schema));
+      await migrate(pool, schema, createMigrations(schema), 'migrations');
     });
 
     afterEach(async () => {
@@ -408,7 +565,7 @@ describe('plans', () => {
       });
 
       const start = process.hrtime();
-      const createTaskQuery = plans.enqueueTasks(taskBatch);
+      const createTaskQuery = plans.enqueueTasks(...taskBatch);
       for (let i = 0; i < 2000; ++i) {
         await Promise.all([
           executeQuery(pool, createTaskQuery),
@@ -436,7 +593,7 @@ describe('plans', () => {
         0
       );
 
-      const createTasksQuery = plans.enqueueTasks(taskBatch);
+      const createTasksQuery = plans.enqueueTasks(...taskBatch);
       const createPromises = [];
       // create
       for (let i = 0; i < 10000; ++i) {
@@ -471,7 +628,7 @@ describe('plans', () => {
         0
       );
 
-      const createTasksQuery = plans.enqueueTasks(taskBatch);
+      const createTasksQuery = plans.enqueueTasks(...taskBatch);
 
       const createPromises = [];
       // create
@@ -495,7 +652,7 @@ describe('plans', () => {
         maxSize: 10,
         maxTimeInMs: 100,
         onFlush: async (batch) => {
-          await executeQuery(pool, plans.resolveTasks(batch.map((item) => item.data)));
+          await executeQuery(pool, plans.resolveTasks(...batch.map((item) => item.data)));
         },
       });
       const start = process.hrtime();

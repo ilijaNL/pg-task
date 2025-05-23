@@ -15,7 +15,7 @@ describe('pg worker', () => {
   let manager: WorkerManager;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer().start();
+    container = await new PostgreSqlContainer('postgres:16.7-alpine').start();
   });
 
   afterAll(async () => {
@@ -62,7 +62,7 @@ describe('pg worker', () => {
     const ee = new EventEmitter();
     const promise = once(ee, 'received');
 
-    const workerId = await manager.register({
+    await manager.register({
       queue: queue,
       options: {
         poolInternvalInMs: 20,
@@ -77,24 +77,21 @@ describe('pg worker', () => {
 
     await executeQuery(
       pool,
-      plans.enqueueTasks([
-        {
-          data: { nosmoke: true },
-          expireInSeconds: 1,
-          maxAttempts: 1,
-          metaData: {},
-          queue: queue,
-          retryBackoff: false,
-          retryDelayInSeconds: 10,
-          singletonKey: null,
-          startAfterSeconds: 0,
-        },
-      ])
+      plans.enqueueTasks({
+        data: { nosmoke: true },
+        expireInSeconds: 1,
+        maxAttempts: 1,
+        metaData: {},
+        queue: queue,
+        retryBackoff: false,
+        retryDelayInSeconds: 10,
+        singletonKey: null,
+        startAfterSeconds: 0,
+      })
     );
 
     await expect(promise).resolves.toEqual([{ nosmoke: true }]);
     await setTimeout(1000);
-    await manager.stopWorker(workerId);
     await manager.stop();
 
     // we should not have any pending tasks left
@@ -137,19 +134,17 @@ describe('pg worker', () => {
 
     await executeQuery(
       pool,
-      plans.enqueueTasks([
-        {
-          data: { nosmoke: true },
-          expireInSeconds: 1,
-          maxAttempts: 1,
-          metaData: {},
-          queue: queue,
-          retryBackoff: false,
-          retryDelayInSeconds: 10,
-          singletonKey: null,
-          startAfterSeconds: 0,
-        },
-      ])
+      plans.enqueueTasks({
+        data: { nosmoke: true },
+        expireInSeconds: 1,
+        maxAttempts: 1,
+        metaData: {},
+        queue: queue,
+        retryBackoff: false,
+        retryDelayInSeconds: 10,
+        singletonKey: null,
+        startAfterSeconds: 0,
+      })
     );
 
     await expect(deferredPromise.promise).resolves.toEqual({ nosmoke: true });
