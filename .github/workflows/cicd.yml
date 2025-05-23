@@ -29,11 +29,11 @@ jobs:
       - uses: actions/setup-node@v4
         id: setup-node
         with:
-          node-version: 20.x
+          node-version: 22.x
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 8
+          version: 9
           # See https://github.com/actions/setup-node/issues/641#issuecomment-1358859686
       - name: pnpm cache path
         id: pnpm-cache-path
