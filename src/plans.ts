@@ -17,8 +17,10 @@ const itemsToKeys = <T extends Record<string, any>>(items: T[], init: KeysToArr<
     return agg;
   }, init);
 
+const selectTaskFields = `id, data, meta_data, created_on, expire_in, attempt, queue, max_attempts, singleton_key`;
+
 export const createPlans = (schema: string) => ({
-  enqueueTasks: (...tasks: ConfiguredTask[]) => {
+  createTasks: (...tasks: ConfiguredTask[]) => {
     const payload = itemsToKeys(tasks, {
       data: new Array(tasks.length),
       expireInSeconds: new Array(tasks.length),
@@ -49,29 +51,21 @@ FROM ${rawSql(schema)}.create_tasks(
 )
 `;
   },
-  popTasks: (queue: string, amount: number): TypedQuery<SelectedTask> => {
-    return sql<{
-      id: string;
-      data: JsonValue;
-      meta_data: JsonValue;
-      created_on: Date;
-      expire_in: number;
-      attempt: number;
-      queue: string;
-      max_attempts: number;
-      singleton_key: string | null;
-    }>`
-SELECT
-  id,
-  data,
-  meta_data,
-  created_on,
-  expire_in,
-  attempt,
-  queue,
-  max_attempts,
-  singleton_key
-FROM ${rawSql(schema)}.get_tasks(${queue}, ${amount}::integer)`;
+  peekTasks: (queue: string, amount: number, visibleAfter: Date) =>
+    sql<SelectedTask & { visible_at: Date; started_on: Date; updated_at: Date }>`
+      SELECT ${rawSql(selectTaskFields)}, visible_at, started_on, updated_at FROM ${rawSql(`${schema}.${TASK_TABLE}`)} t
+        WHERE t.queue = ${queue} 
+          AND t.visible_at >= ${visibleAfter.toISOString()}
+          AND t.attempt < t.max_attempts
+        ORDER BY t.visible_at ASC
+        LIMIT ${amount};
+  `,
+  popTasks: (queue: string, amount: number, visible_at?: Date): TypedQuery<SelectedTask> => {
+    if (visible_at) {
+      return sql<SelectedTask>`SELECT ${rawSql(selectTaskFields)} FROM ${rawSql(schema)}.get_tasks(${queue}, ${amount}::integer, ${visible_at.toISOString()})`;
+    }
+
+    return sql<SelectedTask>`SELECT ${rawSql(selectTaskFields)} FROM ${rawSql(schema)}.get_tasks(${queue}, ${amount}::integer)`;
   },
   /**
    * Resolve tasks
@@ -97,7 +91,7 @@ FROM ${rawSql(schema)}.resolve_tasks(
 )`;
   },
   /**
-   * Removes tasks that are probably will not be picked up because it is already visible for atleast `afterSeconds`.
+   * Removes tasks that are probably will not be picked up because it is already visible for at least `afterSeconds`.
    */
   removeDanglingTasks: (afterSeconds: number) =>
     sql`SELECT ${rawSql(schema)}.remove_dangling_tasks(${afterSeconds}::integer)`,

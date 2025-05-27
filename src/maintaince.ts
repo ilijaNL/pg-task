@@ -2,7 +2,7 @@ import { createPlans, TASK_EXECUTION_TABLE } from './plans';
 import { QueueWorkerConfig } from './queue-worker';
 import { createTaskQueueFactory, TaskResultStates } from './task';
 import { SECONDS_IN_HOUR } from './utils/common';
-import { createQueryExecutor, Pool, rawSql, runTransaction, sql, TypedQuery } from './utils/sql';
+import { createQueryExecutor, Pool, rawSql, withTransaction, sql, TypedQuery } from './utils/sql';
 
 export const maintainceQueue = '__pg_task_maintaince__';
 
@@ -64,24 +64,24 @@ export const createMaintainceWorker = async (
       },
     },
     async handler(data, { id, singleton_key }) {
-      await runTransaction(pool, async (trx) => {
-        if (singleton_key === null) {
-          return;
-        }
+      if (singleton_key === null) {
+        return;
+      }
 
-        const taskToExecute = maintainceTasks.find((t) => t.singletonKey === singleton_key);
+      const taskToExecute = maintainceTasks.find((t) => t.singletonKey === singleton_key);
 
-        if (!taskToExecute) {
-          return;
-        }
+      if (!taskToExecute) {
+        return;
+      }
 
+      await withTransaction(pool, async (trx) => {
         const qExecutor = createQueryExecutor(trx);
         await qExecutor(taskToExecute.query);
 
         // complete this task, and reschedule it in future
         await qExecutor(plans.resolveTasks({ task_id: id, result: data, state: TaskResultStates.success }));
         await qExecutor(
-          plans.enqueueTasks(
+          plans.createTasks(
             ...taskFactory([
               {
                 data: data,
@@ -97,7 +97,7 @@ export const createMaintainceWorker = async (
 
   // ensure we try to create the maintaince tasks always
   await executor(
-    plans.enqueueTasks(
+    plans.createTasks(
       ...taskFactory(
         maintainceTasks.map((t) => ({
           data: null,

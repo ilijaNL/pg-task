@@ -43,12 +43,45 @@ describe('pg worker', () => {
       pgClient: pool,
       schema,
     });
-    await manager.start();
-    await manager.start();
+    manager.start();
+    const start2 = manager.start();
+
+    await start2;
 
     let stopPromise = manager.stop();
     manager.stop();
     await stopPromise;
+  });
+
+  it('smoke test without explicit start', async () => {
+    manager = createManager({
+      pgClient: pool,
+      schema,
+    });
+
+    const r1 = manager.register({
+      queue: 'q1',
+      options: {
+        poolInternvalInMs: 20,
+        maxConcurrency: 10,
+        refillThresholdPct: 0.33,
+      },
+      handler(data) {},
+    });
+
+    const r2 = manager.register({
+      queue: 'q2',
+      options: {
+        poolInternvalInMs: 20,
+        maxConcurrency: 10,
+        refillThresholdPct: 0.33,
+      },
+      handler(data) {},
+    });
+
+    await Promise.all([r1, r2]);
+
+    await manager.stop();
   });
 
   it('smoke test with task', async () => {
@@ -77,7 +110,7 @@ describe('pg worker', () => {
 
     await executeQuery(
       pool,
-      plans.enqueueTasks({
+      plans.createTasks({
         data: { nosmoke: true },
         expireInSeconds: 1,
         maxAttempts: 1,
@@ -134,7 +167,7 @@ describe('pg worker', () => {
 
     await executeQuery(
       pool,
-      plans.enqueueTasks({
+      plans.createTasks({
         data: { nosmoke: true },
         expireInSeconds: 1,
         maxAttempts: 1,

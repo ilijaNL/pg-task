@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { Pool, createQueryExecutor, rawSql, runTransaction, sql } from './sql';
+import { Pool, createQueryExecutor, rawSql, withTransaction, sql } from './sql';
 
 const hashString = (s: string) => crypto.createHash('sha1').update(s, 'utf8').digest('hex');
 
@@ -100,7 +100,7 @@ export async function migrate(pool: Pool, schema: string, migrations: string[], 
   // check if table exists
   const plans = createMigrationPlans(schema, migrationTable);
 
-  await runTransaction(pool, async (client) => {
+  await withTransaction(pool, async (client) => {
     const executor = createQueryExecutor(client);
 
     // acquire lock

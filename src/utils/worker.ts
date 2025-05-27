@@ -9,8 +9,7 @@ export type Worker = {
 
 type ShouldContinue = boolean | void | undefined;
 
-export function createBaseWorker(run: () => Promise<ShouldContinue>, props: { loopInterval: number }): Worker {
-  const { loopInterval } = props;
+export function createBaseWorker(run: () => Promise<ShouldContinue>, config: { loopInterval: number }): Worker {
   let loopPromise: Promise<any>;
   let loopDelayPromise: ClearablePromise<void> | null = null;
   const state = {
@@ -32,7 +31,7 @@ export function createBaseWorker(run: () => Promise<ShouldContinue>, props: { lo
 
       if (state.polling) {
         const delayDuration = Math.max(
-          shouldContinue === true || state.notified === true ? 5 : loopInterval - duration,
+          shouldContinue === true || state.notified === true ? 5 : config.loopInterval - duration,
           // do alteast 5 ms for non blocking loop
           5
         );
