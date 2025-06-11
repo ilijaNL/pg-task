@@ -44,10 +44,10 @@ export type ClearablePromise<T> = Promise<T> & {
 };
 
 export function delay<T>(ms: number, shouldErrorMessage?: string): ClearablePromise<T> {
-  const ac = new AbortController();
+  let ac: AbortController | undefined = new AbortController();
 
   const promise = new Promise<void>((resolve, reject) => {
-    setTimeoutPromise(ms, null, { signal: ac.signal })
+    setTimeoutPromise(ms, null, { signal: ac?.signal })
       .then(() => {
         if (shouldErrorMessage) {
           reject(new Error(shouldErrorMessage));
@@ -55,12 +55,14 @@ export function delay<T>(ms: number, shouldErrorMessage?: string): ClearableProm
           resolve();
         }
       })
-      .catch(resolve);
+      // if it is aborted through the abort signal, the promise will be rejected
+      .catch(() => resolve());
   }) as ClearablePromise<T>;
 
   promise.abort = () => {
-    if (!ac.signal.aborted) {
+    if (ac && !ac.signal.aborted) {
       ac.abort();
+      ac = undefined;
     }
   };
 
@@ -95,3 +97,6 @@ export function mapCompletionDataArg(data: any) {
 
   return serializeError(result);
 }
+
+declare const brandSymbol: unique symbol;
+export type Branded<Type extends string, DataType> = DataType & { [brandSymbol]: Type };

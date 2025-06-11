@@ -2,13 +2,10 @@ import { TASK_EXECUTION_TABLE, TASK_TABLE } from './plans';
 import { TaskResultStates } from './task';
 
 // calculates the next visibility
-const nextVisibility = (
-  taskTable: string,
-  rescheduling: boolean
-) => `now() + ${!rescheduling ? `(interval '1s' * ${taskTable}.expire_in) +` : ''} (
+const visibilityOnFail = (taskTable: string) => `now() + (
   CASE WHEN ${taskTable}.retry_backoff 
     then 
-      interval '1s' * (${taskTable}.retry_delay * (2 ^ LEAST(12, ${taskTable}.attempt + 1)))
+      interval '1s' * (${taskTable}.retry_delay * (2 ^ LEAST(10, GREATEST(0, ${taskTable}.attempt - 1))))
     else (interval '1s' * ${taskTable}.retry_delay)
   end
 )`;
@@ -24,6 +21,7 @@ export const createMigrations = (schema: string) => [
     visible_at timestamptz not null default now(),
     started_on timestamptz,
     created_on timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
 
     -- 8 bytes
     retry_delay integer not null default(2),
@@ -82,7 +80,7 @@ export const createMigrations = (schema: string) => [
 `,
   `
   -- 
-  CREATE OR REPLACE FUNCTION ${schema}.get_tasks(target_q text, amount integer)
+  CREATE OR REPLACE FUNCTION ${schema}.get_tasks(target_q text, amount integer, v_at timestamptz DEFAULT now())
     RETURNS SETOF ${schema}.${TASK_TABLE} AS $$
     BEGIN
       RETURN QUERY
@@ -91,7 +89,7 @@ export const createMigrations = (schema: string) => [
           _tasks.id as id
         FROM ${schema}.${TASK_TABLE} _tasks
         WHERE _tasks.queue = target_q 
-          AND _tasks.visible_at < now()
+          AND _tasks.visible_at <= v_at
           AND _tasks.attempt < _tasks.max_attempts
         ORDER BY _tasks.visible_at ASC
         LIMIT amount
@@ -99,13 +97,27 @@ export const createMigrations = (schema: string) => [
       ) UPDATE ${schema}.${TASK_TABLE} t 
         SET
           -- this is total of expire and retry delay
-          visible_at = ${nextVisibility('t', false)},
+          visible_at = ${visibilityOnFail('t')} + (interval '1s' * t.expire_in),
           started_on = now(),
+          updated_at = now(),
           _version = t._version + 1,
           attempt = t.attempt + 1
         FROM visible_tasks
         WHERE t.id = visible_tasks.id
         RETURNING t.*;
+    END
+  $$ LANGUAGE 'plpgsql';
+
+  CREATE OR REPLACE FUNCTION ${schema}.peek_tasks(target_q text, amount integer, visible_after timestamptz)
+    RETURNS SETOF ${schema}.${TASK_TABLE} AS $$
+    BEGIN
+      RETURN QUERY
+      SELECT * FROM ${schema}.${TASK_TABLE} _tasks
+        WHERE _tasks.queue = target_q 
+          AND _tasks.visible_at >= visible_after
+          AND _tasks.attempt < _tasks.max_attempts
+        ORDER BY _tasks.visible_at ASC
+        LIMIT amount;
     END
   $$ LANGUAGE 'plpgsql';
 
@@ -190,7 +202,8 @@ export const createMigrations = (schema: string) => [
     ), rescheduled AS ( -- reschedule tasks that fail or are expired
       UPDATE ${schema}.${TASK_TABLE} tt
       SET 
-        visible_at = ${nextVisibility('tt', true)},
+        visible_at = ${visibilityOnFail('tt')},
+        updated_at = now(),
         _version = tt._version + 1
       FROM incoming
       WHERE incoming.state = ${TaskResultStates.failed}
@@ -221,7 +234,7 @@ CREATE FUNCTION ${schema}.remove_dangling_tasks(after_seconds integer)
       SELECT
         _tasks.id id,
         ${TaskResultStates.failed}::smallint s,
-        null::jsonb d
+        '{ "message": "task expired because no poll happened." }'::jsonb d
       FROM ${schema}.${TASK_TABLE} _tasks
       WHERE _tasks.visible_at < (now() - (interval '1s' * after_seconds))
       -- lock the rows which are going to be resolved
@@ -242,7 +255,7 @@ CREATE FUNCTION ${schema}.fail_max_attempts()
       SELECT
         _tasks.id id,
         ${TaskResultStates.failed}::smallint s,
-        null::jsonb d
+        '{ "message": "max attempts reached" }'::jsonb d
       FROM ${schema}.${TASK_TABLE} _tasks
       WHERE _tasks.visible_at < now()
         AND _tasks.attempt >= _tasks.max_attempts

@@ -36,7 +36,7 @@ export interface Pool extends QueryClient {
 }
 
 export interface ClientFromPool extends QueryClient {
-  release(err?: boolean | Error | undefined): void;
+  release(...args: any[]): void;
   on(event: 'notification', listener: (message: Notification) => void): unknown;
   off(event: 'notification', listener: (message: Notification) => void): any;
   on(event: 'error', listener: (...args: any[]) => void): unknown;
@@ -60,7 +60,7 @@ export const createQueryExecutor =
   <TRowResult extends QueryResultRow>(query: TypedQuery<TRowResult>) =>
     executeQuery(client, query);
 
-export async function runTransaction<T>(pool: Pool, handler: (client: ClientFromPool) => Promise<T>) {
+export async function withTransaction<T>(pool: Pool, handler: (client: ClientFromPool) => Promise<T>) {
   let client: ClientFromPool | null = await pool.connect();
   let result: T;
   try {
