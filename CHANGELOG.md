@@ -1,5 +1,11 @@
 # pg-task
 
+## 0.0.3
+
+### Patch Changes
+
+- cdf1360: Deal with unexpected connection errors
+
 ## 0.0.2
 
 ### Patch Changes
